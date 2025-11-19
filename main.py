@@ -14,22 +14,25 @@ last_activity = {}
 
 async def notify_user_list():
     """Рассылает всем список онлайн-пользователей"""
-    user_list = list(online_users.keys())
-    message = json.dumps({"type": "user_list", "users": user_list})
-    # Фильтруем только открытые соединения
-    open_connections = []
-    for nick, ws in online_users.items():
-        if ws.open:
-            open_connections.append((nick, ws))
-        else:
-            # Удаляем закрытые соединения
-            if nick in online_users:
+    # Создаем копию ключей для итерации, чтобы избежать изменения словаря во время итерации
+    users_to_check = list(online_users.keys())
+    user_list = []
+
+    for nick in users_to_check:
+        if nick in online_users:  # Проверяем, что пользователь все еще в словаре
+            ws = online_users[nick]
+            if ws.open:
+                user_list.append(nick)
+            else:
+                # Удаляем закрытые соединения
                 del online_users[nick]
                 if nick in last_activity:
                     del last_activity[nick]
 
-    for _, ws in open_connections:
-        await ws.send(message)
+    message = json.dumps({"type": "user_list", "users": user_list})
+    for nick in user_list:
+        if nick in online_users:  # Проверяем, что пользователь все еще в словаре
+            await online_users[nick].send(message)
 
 async def handler(websocket, path):
     current_user = None
@@ -74,9 +77,9 @@ async def handler(websocket, path):
                     # Удаляем неактивное соединение
                     if callee in online_users:
                         del online_users[callee]
-                        if callee in last_activity:
-                            del last_activity[callee]
-                        await notify_user_list()
+                    if callee in last_activity:
+                        del last_activity[callee]
+                    await notify_user_list()
 
             elif msg_type == "call_accepted" and "to" in data and current_user:
                 callee = data["to"]
@@ -88,9 +91,9 @@ async def handler(websocket, path):
                         print(f"Ошибка отправки 'call_accepted' от {current_user} к {callee}: {e}")
                         if callee in online_users:
                             del online_users[callee]
-                            if callee in last_activity:
-                                del last_activity[callee]
-                            await notify_user_list()
+                        if callee in last_activity:
+                            del last_activity[callee]
+                        await notify_user_list()
 
             elif msg_type == "call_rejected" and "to" in data and current_user:
                 callee = data["to"]
@@ -102,9 +105,9 @@ async def handler(websocket, path):
                         print(f"Ошибка отправки 'call_rejected' от {current_user} к {callee}: {e}")
                         if callee in online_users:
                             del online_users[callee]
-                            if callee in last_activity:
-                                del last_activity[callee]
-                            await notify_user_list()
+                        if callee in last_activity:
+                            del last_activity[callee]
+                        await notify_user_list()
 
             elif msg_type in ("offer", "answer", "candidate") and current_user:
                 # Пересылаем напрямую получателю (предполагаем, что комната уже создана)
@@ -144,9 +147,9 @@ async def handler(websocket, path):
 
                         if to_user in online_users:
                             del online_users[to_user]
-                            if to_user in last_activity:
-                                del last_activity[to_user]
-                            await notify_user_list()
+                        if to_user in last_activity:
+                            del last_activity[to_user]
+                        await notify_user_list()
                 else:
                     print(f"Получатель '{to_user}' не найден для сообщения '{msg_type}' от {current_user}")
 
@@ -172,7 +175,9 @@ async def handler(websocket, path):
     finally:
         if current_user in online_users:
             del online_users[current_user]
-            await notify_user_list()
+        if current_user in last_activity:
+            del last_activity[current_user]
+        await notify_user_list()
 
 async def cleanup_task():
     """Фоновая задача для очистки неактивных пользователей"""
@@ -181,12 +186,13 @@ async def cleanup_task():
         current_time = time.time()
         timeout = 120  # Таймаут в 2 минуты
 
-        # Собираем пользователей для удаления
+        # Собираем пользователей для удаления (создаем копию ключей для итерации)
         to_remove = []
-        for nick, last_time in last_activity.items():
-            if current_time - last_time > timeout:
-                if nick in online_users:
-                    to_remove.append(nick)
+        for nick in list(last_activity.keys()):  # Создаем копию ключей для итерации
+            if nick in last_activity:  # Проверяем, что пользователь все еще в словаре
+                if current_time - last_activity[nick] > timeout:
+                    if nick in online_users:
+                        to_remove.append(nick)
 
         # Удаляем неактивных пользователей
         for nick in to_remove:
@@ -196,9 +202,12 @@ async def cleanup_task():
                     await ws.close(code=1001, reason="Таймаут активности")
                 except:
                     pass
+            # Удаляем из обоих словарей, если они существуют
+            if nick in online_users:
                 del online_users[nick]
+            if nick in last_activity:
                 del last_activity[nick]
-                print(f"Удален неактивный пользователь: {nick}")
+            print(f"Удален неактивный пользователь: {nick}")
 
         if to_remove:
             await notify_user_list()
