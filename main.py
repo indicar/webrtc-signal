@@ -63,25 +63,65 @@ async def handler(websocket, path):
                 callee = data["to"]
                 if callee not in online_users:
                     await websocket.send(json.dumps({"type": "error", "message": "Пользователь не в сети"}))
+                    print(f"Пользователь {callee} не в сети, невозможно отправить звонок от {current_user}")
                     continue
                 # Просто пересылаем сообщение звонка получателю
-                await online_users[callee].send(message)
+                try:
+                    await online_users[callee].send(message)
+                    print(f"Сообщение 'call' отправлено от {current_user} к {callee}")
+                except Exception as e:
+                    print(f"Ошибка отправки 'call' от {current_user} к {callee}: {e}")
+                    # Удаляем неактивное соединение
+                    if callee in online_users:
+                        del online_users[callee]
+                        if callee in last_activity:
+                            del last_activity[callee]
+                        await notify_user_list()
 
             elif msg_type == "call_accepted" and "to" in data and current_user:
                 callee = data["to"]
                 if callee in online_users:
-                    await online_users[callee].send(message)
+                    try:
+                        await online_users[callee].send(message)
+                        print(f"Сообщение 'call_accepted' отправлено от {current_user} к {callee}")
+                    except Exception as e:
+                        print(f"Ошибка отправки 'call_accepted' от {current_user} к {callee}: {e}")
+                        if callee in online_users:
+                            del online_users[callee]
+                            if callee in last_activity:
+                                del last_activity[callee]
+                            await notify_user_list()
 
             elif msg_type == "call_rejected" and "to" in data and current_user:
                 callee = data["to"]
                 if callee in online_users:
-                    await online_users[callee].send(message)
+                    try:
+                        await online_users[callee].send(message)
+                        print(f"Сообщение 'call_rejected' отправлено от {current_user} к {callee}")
+                    except Exception as e:
+                        print(f"Ошибка отправки 'call_rejected' от {current_user} к {callee}: {e}")
+                        if callee in online_users:
+                            del online_users[callee]
+                            if callee in last_activity:
+                                del last_activity[callee]
+                            await notify_user_list()
 
             elif msg_type in ("offer", "answer", "candidate") and current_user:
                 # Пересылаем напрямую получателю (предполагаем, что комната уже создана)
                 to_user = data.get("to")
                 if to_user and to_user in online_users:
-                    await online_users[to_user].send(message)
+                    try:
+                        await online_users[to_user].send(message)
+                        print(f"Сообщение '{msg_type}' отправлено от {current_user} к {to_user}")
+                    except Exception as e:
+                        print(f"Ошибка отправки '{msg_type}' от {current_user} к {to_user}: {e}")
+                        if to_user in online_users:
+                            del online_users[to_user]
+                            if to_user in last_activity:
+                                del last_activity[to_user]
+                            await notify_user_list()
+                else:
+                    print(f"Получатель '{to_user}' не найден для сообщения '{msg_type}' от {current_user}")
 
     except websockets.exceptions.ConnectionClosed:
         # Соединение закрыто - удаляем пользователя
