@@ -41,6 +41,11 @@ async def handler(websocket, path):
                 # Просто пересылаем сообщение звонка получателю
                 await online_users[callee].send(message)
 
+            elif msg_type == "call_accepted" and "to" in data and current_user:
+                callee = data["to"]
+                if callee in online_users:
+                    await online_users[callee].send(message)
+
             elif msg_type == "call_rejected" and "to" in data and current_user:
                 callee = data["to"]
                 if callee in online_users:
