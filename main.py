@@ -18,7 +18,6 @@ async def handler(websocket, path):
                 if websocket not in rooms[room]:
                     rooms[room].append(websocket)
 
-                # Отправить всем в комнате, кроме отправителя
                 for client in rooms[room]:
                     if client != websocket and client.open:
                         await client.send(message)
@@ -31,9 +30,11 @@ async def handler(websocket, path):
             if websocket in room_clients:
                 room_clients.remove(websocket)
 
-port = int(os.environ.get("PORT", 8000))
-start_server = websockets.serve(handler, "0.0.0.0", port)
+async def main():
+    port = int(os.environ.get("PORT", 8000))
+    print(f"Сервер запущен на порту {port}")
+    async with websockets.serve(handler, "0.0.0.0", port):
+        await asyncio.Future()  # run forever
 
 if __name__ == "__main__":
-    print(f"Сервер запущен на порту {port}")
-    asyncio.run(start_server)
+    asyncio.run(main())
