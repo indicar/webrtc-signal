@@ -79,12 +79,16 @@ async def handler(websocket, path):
                 await notify_user_list()
 
                 # Затем создаем и рассылаем ВСЕМ сообщение о новом подключении
+                # Создаем копию ключей, чтобы избежать проблем при итерации
+                all_nicks = list(online_users.keys())
                 joined_message = json.dumps({"type": "joined", "nickname": nickname})
-                for user_ws in online_users.values():
-                    try:
-                        await user_ws.send(joined_message)
-                    except Exception as e:
-                        print(f"Could not send joined message to a user: {e}")
+                
+                for nick in all_nicks:
+                    if nick in online_users: # Проверяем, что пользователь все еще онлайн
+                        try:
+                            await online_users[nick].send(joined_message)
+                        except Exception as e:
+                            print(f"Could not send joined message to user {nick}: {e}")
             
             elif msg_type == "call" and "to" in data and current_user:
                 callee = data["to"]
