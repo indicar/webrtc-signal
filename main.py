@@ -7,8 +7,6 @@ from collections import defaultdict
 
 # ник → websocket
 online_users = {}
-# комната (frozenset{user1, user2}) → [ws1, ws2]
-rooms = {}
 
 async def notify_user_list():
     """Рассылает всем список онлайн-пользователей"""
@@ -40,14 +38,13 @@ async def handler(websocket, path):
                 if callee not in online_users:
                     await websocket.send(json.dumps({"type": "error", "message": "Пользователь не в сети"}))
                     continue
-                # Создаём уникальную комнату для пары
-                room_id = frozenset([current_user, callee])
-                if room_id not in rooms:
-                    rooms[room_id] = [websocket, online_users[callee]]
-                # Пересылаем всё в комнату
-                for client in rooms[room_id]:
-                    if client.open and client != websocket:
-                        await client.send(message)
+                # Просто пересылаем сообщение звонка получателю
+                await online_users[callee].send(message)
+
+            elif msg_type == "call_rejected" and "to" in data and current_user:
+                callee = data["to"]
+                if callee in online_users:
+                    await online_users[callee].send(message)
 
             elif msg_type in ("offer", "answer", "candidate") and current_user:
                 # Пересылаем напрямую получателю (предполагаем, что комната уже создана)
@@ -61,10 +58,6 @@ async def handler(websocket, path):
         if current_user in online_users:
             del online_users[current_user]
             await notify_user_list()
-        # Удаляем комнаты с этим пользователем
-        to_remove = [room for room in rooms if current_user in room]
-        for room in to_remove:
-            del rooms[room]
 
 async def main():
     port = int(os.environ.get("PORT", 8000))
