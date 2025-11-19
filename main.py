@@ -113,8 +113,35 @@ async def handler(websocket, path):
                     try:
                         await online_users[to_user].send(message)
                         print(f"Сообщение '{msg_type}' отправлено от {current_user} к {to_user}")
+
+                        # Отправляем диагностическое сообщение инициатору
+                        diagnostic_msg = {
+                            "type": "server_log",
+                            "level": "info",
+                            "message": f"Сообщение '{msg_type}' успешно доставлено пользователю {to_user}",
+                            "timestamp": time.time()
+                        }
+                        if current_user in online_users:
+                            try:
+                                await online_users[current_user].send(json.dumps(diagnostic_msg))
+                            except:
+                                pass  # Игнорируем ошибки отправки диагностики
+
                     except Exception as e:
                         print(f"Ошибка отправки '{msg_type}' от {current_user} к {to_user}: {e}")
+                        # Отправляем сообщение об ошибке инициатору
+                        error_msg = {
+                            "type": "server_log",
+                            "level": "error",
+                            "message": f"Ошибка доставки '{msg_type}' пользователю {to_user}: {str(e)}",
+                            "timestamp": time.time()
+                        }
+                        if current_user in online_users:
+                            try:
+                                await online_users[current_user].send(json.dumps(error_msg))
+                            except:
+                                pass  # Игнорируем ошибки отправки диагностики
+
                         if to_user in online_users:
                             del online_users[to_user]
                             if to_user in last_activity:
@@ -122,6 +149,19 @@ async def handler(websocket, path):
                             await notify_user_list()
                 else:
                     print(f"Получатель '{to_user}' не найден для сообщения '{msg_type}' от {current_user}")
+
+                    # Отправляем сообщение об ошибке инициатору
+                    error_msg = {
+                        "type": "server_log",
+                        "level": "error",
+                        "message": f"Пользователь '{to_user}' не найден для сообщения '{msg_type}'",
+                        "timestamp": time.time()
+                    }
+                    if current_user in online_users:
+                        try:
+                            await online_users[current_user].send(json.dumps(error_msg))
+                        except:
+                            pass  # Игнорируем ошибки отправки диагностики
 
     except websockets.exceptions.ConnectionClosed:
         # Соединение закрыто - удаляем пользователя
