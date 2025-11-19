@@ -5,31 +5,57 @@ import asyncio
 import websockets
 from collections import defaultdict
 
+import time
+
 # ник → websocket
 online_users = {}
+# ник → время последней активности
+last_activity = {}
 
 async def notify_user_list():
     """Рассылает всем список онлайн-пользователей"""
     user_list = list(online_users.keys())
     message = json.dumps({"type": "user_list", "users": user_list})
-    for ws in online_users.values():
+    # Фильтруем только открытые соединения
+    open_connections = []
+    for nick, ws in online_users.items():
         if ws.open:
-            await ws.send(message)
+            open_connections.append((nick, ws))
+        else:
+            # Удаляем закрытые соединения
+            if nick in online_users:
+                del online_users[nick]
+                if nick in last_activity:
+                    del last_activity[nick]
+
+    for _, ws in open_connections:
+        await ws.send(message)
 
 async def handler(websocket, path):
     current_user = None
     try:
         async for message in websocket:
+            # Обновляем время активности при любом сообщении
+            if current_user:
+                last_activity[current_user] = time.time()
+
             data = json.loads(message)
             msg_type = data.get("type")
 
             if msg_type == "join" and "nickname" in data:
                 nickname = data["nickname"]
+                # Закрываем старое соединение, если пользователь уже онлайн
                 if nickname in online_users:
-                    await websocket.send(json.dumps({"type": "error", "message": "Ник занят"}))
-                    continue
+                    old_ws = online_users[nickname]
+                    try:
+                        await old_ws.close(code=1000, reason="Другая сессия активна")
+                    except:
+                        pass  # Старое соединение уже закрыто
+                    await notify_user_list()
+
                 online_users[nickname] = websocket
                 current_user = nickname
+                last_activity[nickname] = time.time()  # Обновляем время активности
                 await notify_user_list()
                 await websocket.send(json.dumps({"type": "joined", "nickname": nickname}))
 
@@ -57,16 +83,53 @@ async def handler(websocket, path):
                 if to_user and to_user in online_users:
                     await online_users[to_user].send(message)
 
-    except Exception as e:
+    except websockets.exceptions.ConnectionClosed:
+        # Соединение закрыто - удаляем пользователя
         pass
+    except Exception as e:
+        # Логируем ошибки для отладки
+        print(f"Ошибка обработки сообщения: {e}")
     finally:
         if current_user in online_users:
             del online_users[current_user]
             await notify_user_list()
 
+async def cleanup_task():
+    """Фоновая задача для очистки неактивных пользователей"""
+    while True:
+        await asyncio.sleep(30)  # Проверяем каждые 30 секунд
+        current_time = time.time()
+        timeout = 120  # Таймаут в 2 минуты
+
+        # Собираем пользователей для удаления
+        to_remove = []
+        for nick, last_time in last_activity.items():
+            if current_time - last_time > timeout:
+                if nick in online_users:
+                    to_remove.append(nick)
+
+        # Удаляем неактивных пользователей
+        for nick in to_remove:
+            if nick in online_users:
+                ws = online_users[nick]
+                try:
+                    await ws.close(code=1001, reason="Таймаут активности")
+                except:
+                    pass
+                del online_users[nick]
+                del last_activity[nick]
+                print(f"Удален неактивный пользователь: {nick}")
+
+        if to_remove:
+            await notify_user_list()
+
 async def main():
     port = int(os.environ.get("PORT", 8000))
     print(f"Сервер запущен на порту {port}")
+
+    # Запускаем задачу очистки в фоне
+    asyncio.create_task(cleanup_task())
+
     async with websockets.serve(handler, "0.0.0.0", port):
         await asyncio.Future()
 
