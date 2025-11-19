@@ -74,9 +74,18 @@ async def handler(websocket, path):
                 online_users[nickname] = websocket
                 current_user = nickname
                 last_activity[nickname] = time.time()  # Обновляем время активности
+                
+                # Сначала рассылаем обновленный список пользователей
                 await notify_user_list()
-                await websocket.send(json.dumps({"type": "joined", "nickname": nickname}))
 
+                # Затем создаем и рассылаем ВСЕМ сообщение о новом подключении
+                joined_message = json.dumps({"type": "joined", "nickname": nickname})
+                for user_ws in online_users.values():
+                    try:
+                        await user_ws.send(joined_message)
+                    except Exception as e:
+                        print(f"Could not send joined message to a user: {e}")
+            
             elif msg_type == "call" and "to" in data and current_user:
                 callee = data["to"]
                 if callee not in online_users:
